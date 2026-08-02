@@ -104,6 +104,11 @@
   .macro-row.remaining .val.pos{color:var(--good);}
 
   .goals-toggle{margin-top:10px;font-size:12px;color:var(--ink-soft);text-align:center;text-decoration:underline;cursor:pointer;}
+  .donut-wrap{display:flex;align-items:center;gap:18px;margin-top:16px;padding-top:14px;border-top:1px solid #eee;}
+  .donut-legend{flex:1;}
+  .legend-row{display:flex;align-items:center;gap:7px;font-size:13px;margin-bottom:5px;}
+  .legend-row b{margin-left:auto;font-family:'Archivo Narrow',sans-serif;font-size:14px;}
+  .legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
   .goals-form{display:none;margin-top:10px;gap:8px;flex-wrap:wrap;}
   .goals-form.open{display:flex;}
   .goals-form label{font-size:11px;color:var(--ink-soft);display:block;margin-bottom:2px;}
@@ -193,6 +198,11 @@
     <div class="macro-row"><span>Protein</span><span class="val num" id="totalProtein">0 g</span></div>
     <div class="macro-row"><span>Carbs</span><span class="val num" id="totalCarbs">0 g</span></div>
     <div class="macro-row"><span>Fat</span><span class="val num" id="totalFat">0 g</span></div>
+
+    <div class="donut-wrap">
+      <div id="donutSvg"></div>
+      <div class="donut-legend" id="donutLegend"></div>
+    </div>
 
     <div class="goals-toggle" id="goalsToggle">set daily goals</div>
     <div class="goals-form" id="goalsForm">
@@ -320,6 +330,44 @@ function updateTabs(){
   document.getElementById('cardName').textContent = names[currentPerson];
 }
 
+function renderDonut(protein, carbs, fat){
+  const size=88, stroke=15, r=(size-stroke)/2, c=2*Math.PI*r;
+  const pCals = protein*4, cCals = carbs*4, fCals = fat*9;
+  const total = pCals+cCals+fCals;
+  const svgEl = document.getElementById('donutSvg');
+  const legendEl = document.getElementById('donutLegend');
+
+  if(total <= 0){
+    svgEl.innerHTML = `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">
+      <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="#E2E4E7" stroke-width="${stroke}"/>
+    </svg>`;
+    legendEl.innerHTML = '<div class="sub" style="margin:0;">Log food to see your macro split</div>';
+    return;
+  }
+
+  const segs = [
+    {label:'Protein', val:pCals, color:'#2F6F4F'},
+    {label:'Carbs', val:cCals, color:'#C97A2B'},
+    {label:'Fat', val:fCals, color:'#6B4694'}
+  ];
+  let offset = 0;
+  let circles = '';
+  segs.forEach(s=>{
+    const pct = s.val/total;
+    const dash = pct*c;
+    if(dash > 0){
+      circles += `<circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${stroke}" stroke-dasharray="${dash} ${c-dash}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${size/2} ${size/2})"/>`;
+    }
+    offset += dash;
+  });
+  svgEl.innerHTML = `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">${circles}</svg>`;
+
+  legendEl.innerHTML = segs.map(s=>{
+    const pct = Math.round(s.val/total*100);
+    return `<div class="legend-row"><span class="legend-dot" style="background:${s.color}"></span>${s.label}<b>${pct}%</b></div>`;
+  }).join('');
+}
+
 async function render(){
   updateTabs();
   document.getElementById('cardDate').textContent = displayDate(currentDate)+"'s totals";
@@ -333,6 +381,8 @@ async function render(){
   document.getElementById('totalProtein').textContent = Math.round(protein)+' g';
   document.getElementById('totalCarbs').textContent = Math.round(carbs)+' g';
   document.getElementById('totalFat').textContent = Math.round(fat)+' g';
+
+  renderDonut(protein, carbs, fat);
 
   const g = goals[currentPerson] || {};
   const macroRows = document.querySelectorAll('.macro-row');
@@ -408,7 +458,7 @@ const recentPane = document.getElementById('recentPane');
 const formPane = document.getElementById('formPane');
 const productPane = document.getElementById('productPane');
 
-let history = []; // [{barcode, name, brand, image, per100:{cals,protein,carbs,fat}, lastUsed}]
+let history = []; // [{id, name, brand, image, perBasis:{cals,protein,carbs,fat}, servingBasis, lastUsed}]
 
 async function loadHistory(){
   try{
@@ -419,9 +469,9 @@ async function loadHistory(){
 async function saveHistory(){
   try{ await window.storage.set('history', JSON.stringify(history), true); }catch(e){}
 }
-function upsertHistory(product, barcode){
-  history = history.filter(h => h.barcode !== barcode);
-  history.unshift({ barcode, name: product.name, brand: product.brand, image: product.image, per100: product.per100, lastUsed: Date.now() });
+function upsertHistory(entry){
+  history = history.filter(h => h.id !== entry.id);
+  history.unshift({ ...entry, lastUsed: Date.now() });
   if(history.length > 40) history = history.slice(0,40);
   saveHistory();
 }
@@ -430,7 +480,7 @@ function renderRecentList(filter){
   const q = (filter||'').toLowerCase();
   const items = history.filter(h => !q || h.name.toLowerCase().includes(q) || (h.brand||'').toLowerCase().includes(q));
   if(items.length===0){
-    el.innerHTML = '<div class="empty">No recent products yet — scan something first.</div>';
+    el.innerHTML = '<div class="empty">No recent products yet — log something first.</div>';
     return;
   }
   el.innerHTML = '';
@@ -447,14 +497,14 @@ function renderRecentList(filter){
       </div>
     `;
     div.addEventListener('click', ()=>{
-      pendingProduct = { name: h.name, brand: h.brand, image: h.image, per100: h.per100 };
+      pendingProduct = { id: h.id, name: h.name, brand: h.brand, image: h.image };
       document.getElementById('fName').value = h.name;
-      document.getElementById('fServing').value = 100;
+      document.getElementById('fServing').value = h.servingBasis;
       document.getElementById('fQty').value = 1;
-      document.getElementById('fCals').value = Math.round(h.per100.cals);
-      document.getElementById('fProtein').value = round1(h.per100.protein);
-      document.getElementById('fCarbs').value = round1(h.per100.carbs);
-      document.getElementById('fFat').value = round1(h.per100.fat);
+      document.getElementById('fCals').value = Math.round(h.perBasis.cals);
+      document.getElementById('fProtein').value = round1(h.perBasis.protein);
+      document.getElementById('fCarbs').value = round1(h.perBasis.carbs);
+      document.getElementById('fFat').value = round1(h.perBasis.fat);
       recentPane.style.display = 'none';
       formPane.style.display = 'block';
     });
@@ -465,7 +515,7 @@ document.getElementById('recentSearch').addEventListener('input', (e)=>{
   renderRecentList(e.target.value);
 });
 
-let pendingProduct = null; // per-100g or per-serving macro data from lookup
+let pendingProduct = null; // {id, name, brand, image} of the currently loaded product, if any
 
 function openSheet(){
   overlay.classList.add('open');
@@ -564,6 +614,7 @@ async function handleBarcode(code){
     const p = data.product;
     const n = p.nutriments || {};
     pendingProduct = {
+      id: code,
       name: p.product_name || p.generic_name || 'Unnamed product',
       brand: p.brands || '',
       image: p.image_front_small_url || p.image_url || '',
@@ -595,7 +646,6 @@ async function handleBarcode(code){
     scanPane.style.display='none';
     formPane.style.display='block';
     stopScanner();
-    upsertHistory(pendingProduct, code);
   }catch(e){
     errEl.style.display='block';
     errEl.textContent = 'Lookup failed — check connection or try manual entry.';
@@ -624,6 +674,18 @@ document.getElementById('saveBtn').addEventListener('click', async ()=>{
   const list = await getEntries(currentPerson, currentDate);
   list.push(entry);
   await setEntries(currentPerson, currentDate, list);
+
+  // save/update this food in history — whether it came from a scan, recent, or manual entry
+  const historyId = pendingProduct?.id || ('manual:' + name.toLowerCase());
+  upsertHistory({
+    id: historyId,
+    name,
+    brand: pendingProduct?.brand || '',
+    image: pendingProduct?.image || '',
+    servingBasis: serving,
+    perBasis: { cals: calsPer, protein: proteinPer, carbs: carbsPer, fat: fatPer }
+  });
+
   closeSheetFn();
   render();
 });
