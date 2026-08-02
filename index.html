@@ -3,10 +3,53 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Macros">
+<meta name="theme-color" content="#EDEEF0">
 <title>Macros</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@500;600;700&family=Karla:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<script>
+  window.storageReady = new Promise(res => { window.storageReadyResolve = res; });
+</script>
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getFirestore, doc, getDoc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  // ---- PASTE YOUR FIREBASE CONFIG BELOW (from Firebase console > Project settings) ----
+  const firebaseConfig = {
+    apiKey: "PASTE_ME",
+    authDomain: "PASTE_ME",
+    projectId: "PASTE_ME",
+    storageBucket: "PASTE_ME",
+    messagingSenderId: "PASTE_ME",
+    appId: "PASTE_ME"
+  };
+  // ---------------------------------------------------------------------------------
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  window.storage = {
+    async get(key, shared){
+      const snap = await getDoc(doc(db, 'macroApp', key));
+      if(!snap.exists()) throw new Error('not found: '+key);
+      return { key, value: snap.data().value, shared: !!shared };
+    },
+    async set(key, value, shared){
+      await setDoc(doc(db, 'macroApp', key), { value });
+      return { key, value, shared: !!shared };
+    },
+    async delete(key, shared){
+      await deleteDoc(doc(db, 'macroApp', key));
+      return { key, deleted: true, shared: !!shared };
+    }
+  };
+  window.storageReadyResolve();
+</script>
 <style>
   :root{
     --paper:#EDEEF0;
@@ -131,8 +174,8 @@
     <button id="nextDay">›</button>
   </div>
   <div class="tabs">
-    <div class="tab" id="tabA"><input id="nameA" value="Person 1"></div>
-    <div class="tab" id="tabB"><input id="nameB" value="Person 2"></div>
+    <div class="tab" id="tabA">Tim</div>
+    <div class="tab" id="tabB">Jana</div>
   </div>
 </header>
 
@@ -222,7 +265,7 @@
 const PERSON_KEY = {a:'a', b:'b'};
 let currentPerson = 'a';
 let currentDate = new Date();
-let names = {a:'Person 1', b:'Person 2'};
+let names = {a:'Tim', b:'Jana'};
 let goals = {a:{}, b:{}};
 let html5Qrcode = null;
 let scannerRunning = false;
@@ -245,12 +288,9 @@ async function loadSettings(){
     const r = await window.storage.get('settings', true);
     if(r && r.value){
       const s = JSON.parse(r.value);
-      names = s.names || names;
       goals = s.goals || goals;
     }
   }catch(e){}
-  document.getElementById('nameA').value = names.a;
-  document.getElementById('nameB').value = names.b;
 }
 async function saveSettings(){
   try{
@@ -337,10 +377,6 @@ async function render(){
 
 document.getElementById('tabA').addEventListener('click', ()=>{ currentPerson='a'; render(); });
 document.getElementById('tabB').addEventListener('click', ()=>{ currentPerson='b'; render(); });
-document.getElementById('nameA').addEventListener('click', e=>e.stopPropagation());
-document.getElementById('nameB').addEventListener('click', e=>e.stopPropagation());
-document.getElementById('nameA').addEventListener('change', e=>{ names.a=e.target.value||'Person 1'; saveSettings(); render(); });
-document.getElementById('nameB').addEventListener('change', e=>{ names.b=e.target.value||'Person 2'; saveSettings(); render(); });
 
 document.getElementById('prevDay').addEventListener('click', ()=>{ currentDate.setDate(currentDate.getDate()-1); render(); });
 document.getElementById('nextDay').addEventListener('click', ()=>{ currentDate.setDate(currentDate.getDate()+1); render(); });
@@ -593,6 +629,7 @@ document.getElementById('saveBtn').addEventListener('click', async ()=>{
 });
 
 (async function init(){
+  await window.storageReady;
   await loadSettings();
   await loadHistory();
   render();
