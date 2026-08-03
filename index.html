@@ -485,7 +485,16 @@ let history = []; // [{id, name, brand, image, perBasis:{cals,protein,carbs,fat}
 async function loadHistory(){
   try{
     const r = await window.storage.get('history', true);
-    history = r && r.value ? JSON.parse(r.value) : [];
+    const raw = r && r.value ? JSON.parse(r.value) : [];
+    history = raw.map(h => ({
+      id: h.id || h.barcode || ('legacy:' + h.name),
+      name: h.name,
+      brand: h.brand || '',
+      image: h.image || '',
+      servingBasis: h.servingBasis || 100,
+      perBasis: h.perBasis || h.per100 || {cals:0, protein:0, carbs:0, fat:0},
+      lastUsed: h.lastUsed || Date.now()
+    }));
   }catch(e){ history = []; }
 }
 async function saveHistory(){
@@ -500,13 +509,16 @@ function upsertHistory(entry){
 function renderRecentList(filter){
   const el = document.getElementById('recentList');
   const q = (filter||'').toLowerCase();
-  const items = history.filter(h => !q || h.name.toLowerCase().includes(q) || (h.brand||'').toLowerCase().includes(q));
-  if(items.length===0){
+  const matches = history
+    .map((h, idx) => ({h, idx}))
+    .filter(x => !q || x.h.name.toLowerCase().includes(q) || (x.h.brand||'').toLowerCase().includes(q));
+
+  if(matches.length===0){
     el.innerHTML = '<div class="empty">No recent products yet — log something first.</div>';
     return;
   }
   el.innerHTML = '';
-  items.forEach(h=>{
+  matches.forEach(({h, idx})=>{
     const div = document.createElement('div');
     div.className = 'product-preview';
     div.style.marginBottom = '8px';
@@ -518,7 +530,7 @@ function renderRecentList(filter){
           <div class="pbrand">${h.brand||''}</div>
         </div>
       </div>
-      <button class="del" data-id="${h.id}">×</button>
+      <button class="del" data-idx="${idx}">×</button>
     `;
     div.querySelector('.recent-tap').addEventListener('click', ()=>{
       pendingProduct = { id: h.id, name: h.name, brand: h.brand, image: h.image };
@@ -534,7 +546,8 @@ function renderRecentList(filter){
     });
     div.querySelector('.del').addEventListener('click', (ev)=>{
       ev.stopPropagation();
-      history = history.filter(x => x.id !== h.id);
+      const realIdx = parseInt(ev.currentTarget.dataset.idx);
+      history.splice(realIdx, 1);
       saveHistory();
       renderRecentList(document.getElementById('recentSearch').value);
     });
