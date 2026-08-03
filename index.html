@@ -145,6 +145,12 @@
   .mode-btn{flex:1;padding:10px;border-radius:10px;border:1px solid var(--line);background:#fff;font-weight:600;font-size:13px;cursor:pointer;}
   .mode-btn.sel{background:var(--ink);color:#fff;border-color:var(--ink);}
 
+  .meal-row{display:flex;gap:6px;margin-bottom:16px;}
+  .meal-btn{flex:1;padding:9px 4px;border-radius:10px;border:1px solid var(--line);background:#fff;font-weight:600;font-size:12px;cursor:pointer;color:var(--ink-soft);}
+  .meal-btn.sel{background:var(--a-indigo);color:#fff;border-color:var(--a-indigo);}
+
+  .meal-header{display:flex;justify-content:space-between;font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:var(--ink-soft);font-weight:700;margin:16px 0 6px;}
+
   #reader{width:100%;border-radius:12px;overflow:hidden;margin-bottom:10px;background:#000;min-height:200px;}
   .scan-status{font-size:13px;color:var(--ink-soft);text-align:center;margin-bottom:10px;}
   .barcode-manual{display:flex;gap:8px;margin-bottom:14px;}
@@ -224,6 +230,13 @@
     <div class="sheet-head">
       <h3>Add food</h3>
       <button class="close-x" id="closeSheet">×</button>
+    </div>
+
+    <div class="meal-row" id="mealRow">
+      <button class="meal-btn" data-meal="Breakfast">Breakfast</button>
+      <button class="meal-btn" data-meal="Lunch">Lunch</button>
+      <button class="meal-btn" data-meal="Dinner">Dinner</button>
+      <button class="meal-btn" data-meal="Snacks">Snacks</button>
     </div>
 
     <div class="mode-row">
@@ -392,20 +405,29 @@ async function render(){
   if(list.length===0){
     entryList.innerHTML = '<div class="empty">Nothing logged yet — tap "Log food" to add something.</div>';
   } else {
-    list.slice().reverse().forEach((e)=>{
-      const realIdx = list.indexOf(e);
-      const div = document.createElement('div');
-      div.className='entry';
-      div.innerHTML = `
-        <div class="dot ${currentPerson}"></div>
-        <div class="info">
-          <div class="name">${e.name}</div>
-          <div class="meta">${e.qtyLabel||''}</div>
-        </div>
-        <div class="cals num">${Math.round(e.cals)}</div>
-        <button class="del" data-idx="${realIdx}">×</button>
-      `;
-      entryList.appendChild(div);
+    const mealOrder = ['Breakfast','Lunch','Dinner','Snacks'];
+    mealOrder.forEach(meal=>{
+      const grouped = list.map((e,i)=>({e,i})).filter(x => (x.e.meal||'Snacks')===meal);
+      if(grouped.length===0) return;
+      const mealCals = grouped.reduce((s,x)=>s+x.e.cals,0);
+      const header = document.createElement('div');
+      header.className = 'meal-header';
+      header.innerHTML = `<span>${meal}</span><span>${Math.round(mealCals)} cal</span>`;
+      entryList.appendChild(header);
+      grouped.forEach(({e,i})=>{
+        const div = document.createElement('div');
+        div.className='entry';
+        div.innerHTML = `
+          <div class="dot ${currentPerson}"></div>
+          <div class="info">
+            <div class="name">${e.name}</div>
+            <div class="meta">${e.qtyLabel||''}</div>
+          </div>
+          <div class="cals num">${Math.round(e.cals)}</div>
+          <button class="del" data-idx="${i}">×</button>
+        `;
+        entryList.appendChild(div);
+      });
     });
     entryList.querySelectorAll('.del').forEach(btn=>{
       btn.addEventListener('click', async (ev)=>{
@@ -487,16 +509,18 @@ function renderRecentList(filter){
   items.forEach(h=>{
     const div = document.createElement('div');
     div.className = 'product-preview';
-    div.style.cursor = 'pointer';
     div.style.marginBottom = '8px';
     div.innerHTML = `
-      ${h.image ? `<img src="${h.image}">` : ''}
-      <div style="flex:1;">
-        <div class="pname">${h.name}</div>
-        <div class="pbrand">${h.brand||''}</div>
+      <div style="display:flex;gap:12px;align-items:center;flex:1;cursor:pointer;" class="recent-tap">
+        ${h.image ? `<img src="${h.image}">` : ''}
+        <div style="flex:1;">
+          <div class="pname">${h.name}</div>
+          <div class="pbrand">${h.brand||''}</div>
+        </div>
       </div>
+      <button class="del" data-id="${h.id}">×</button>
     `;
-    div.addEventListener('click', ()=>{
+    div.querySelector('.recent-tap').addEventListener('click', ()=>{
       pendingProduct = { id: h.id, name: h.name, brand: h.brand, image: h.image };
       document.getElementById('fName').value = h.name;
       document.getElementById('fServing').value = h.servingBasis;
@@ -508,6 +532,12 @@ function renderRecentList(filter){
       recentPane.style.display = 'none';
       formPane.style.display = 'block';
     });
+    div.querySelector('.del').addEventListener('click', (ev)=>{
+      ev.stopPropagation();
+      history = history.filter(x => x.id !== h.id);
+      saveHistory();
+      renderRecentList(document.getElementById('recentSearch').value);
+    });
     el.appendChild(div);
   });
 }
@@ -516,9 +546,28 @@ document.getElementById('recentSearch').addEventListener('input', (e)=>{
 });
 
 let pendingProduct = null; // {id, name, brand, image} of the currently loaded product, if any
+let selectedMeal = 'Breakfast';
+
+function defaultMealForNow(){
+  const h = new Date().getHours();
+  if(h < 11) return 'Breakfast';
+  if(h < 16) return 'Lunch';
+  if(h < 21) return 'Dinner';
+  return 'Snacks';
+}
+function setMeal(meal){
+  selectedMeal = meal;
+  document.querySelectorAll('.meal-btn').forEach(b=>{
+    b.classList.toggle('sel', b.dataset.meal === meal);
+  });
+}
+document.querySelectorAll('.meal-btn').forEach(b=>{
+  b.addEventListener('click', ()=> setMeal(b.dataset.meal));
+});
 
 function openSheet(){
   overlay.classList.add('open');
+  setMeal(defaultMealForNow());
   setMode('scan');
 }
 function closeSheetFn(){
@@ -664,6 +713,7 @@ document.getElementById('saveBtn').addEventListener('click', async ()=>{
 
   const entry = {
     name,
+    meal: selectedMeal,
     qtyLabel: qty+' × '+serving+'g serving',
     cals: calsPer*qty,
     protein: proteinPer*qty,
